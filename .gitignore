@@ -1,0 +1,13 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 仿真生成产物 (可由 python main.py 重新生成)
+sim/output/*.png
+
+# 系统/编辑器杂项
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
