@@ -177,3 +177,40 @@ def slot_table_pos(color, board, slot_local):
     y = board["y"] + lx * sa + ly * ca
     u, v = x * C.PX_PER_MM, y * C.PX_PER_MM
     return {"x": x, "y": y, "deg": board["deg"], "uv": (int(u), int(v))}
+
+
+# ============================================================
+# Protocol 实现: 把上面的 module 级函数包成一个类
+# ============================================================
+# 说明: OpenCVVision 实现 interfaces.VisionModule。每个方法直接委托到本模块的
+# 同名全局函数, 逻辑逐字不变。方法名与全局函数同名不会互相遮蔽 (方法体内的裸名
+# detect_board_pose / detect_blocks / calibrate_slots / slot_table_pos 解析到
+# module 全局作用域, 不是 self 属性, 故无递归)。类型注解可选, 仅供阅读。
+import interfaces
+
+
+class OpenCVVision:
+    """真 OpenCV 单目视觉管线, 实现 interfaces.VisionModule。
+
+    仅作结构化封装: 所有算法仍在本模块的 module 级函数中, 本类只做委托,
+    以便 main.py 依赖抽象接口, 真机可无缝替换为标定后的实现。
+    """
+
+    def detect_board_pose(self, img: "interfaces.Image") -> "interfaces.Optional[interfaces.BoardPose]":
+        return detect_board_pose(img)
+
+    def detect_blocks(
+        self, img: "interfaces.Image", board: "interfaces.Optional[interfaces.BoardPose]" = None
+    ) -> "dict[interfaces.Color, interfaces.BlockPose]":
+        return detect_blocks(img, board)
+
+    def calibrate_slots(
+        self, img: "interfaces.Image", board: "interfaces.BoardPose"
+    ) -> "interfaces.SlotLocal":
+        return calibrate_slots(img, board)
+
+    def slot_table_pos(
+        self, color: "interfaces.Color", board: "interfaces.BoardPose",
+        slot_local: "interfaces.SlotLocal",
+    ) -> "interfaces.SlotPose":
+        return slot_table_pos(color, board, slot_local)

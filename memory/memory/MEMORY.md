@@ -1,0 +1,4 @@
+- [写作规范-PPT答辩](writing-style-ppt.md) — 语言克制准确,价值判断与内容分离,中文
+- [汇报不浮夸](reporting-no-flattery.md) — 汇报工作避免自我标榜/表功式措辞,让事实说话
+- [赛题任务总结](contest-task-summary.md) — 具身智能精密装配赛,任务/难点/核心原则
+- [仿真原型](sim-prototype.md) — sim/ 可运行全流程仿真,真OpenCV管线,两待确认点结论

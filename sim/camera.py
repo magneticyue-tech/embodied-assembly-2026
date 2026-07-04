@@ -72,3 +72,22 @@ def render(scene, noise=True):
         nz = np.random.normal(0, 3.5, img.shape).astype(np.float32)
         img = np.clip(img.astype(np.float32) + nz, 0, 255).astype(np.uint8)
     return img
+
+
+# ============================================================
+# 接口适配 · 感知层相机采集 (interfaces.CameraSource)
+# ============================================================
+
+class SimCamera:
+    """
+    仿真相机: 实现 interfaces.CameraSource 协议。
+    取一帧图像 = 对绑定的 Scene 做正射渲染 (委托 render(), 逻辑逐字不变)。
+    真机换成 IndustrialCamera(工业单目采集), 同一 capture() 接口, 主流程不变。
+    """
+
+    def __init__(self, scene):
+        self.scene = scene
+
+    def capture(self):
+        """取一帧 BGR 图像 (HxWx3, uint8)。委托模块级 render() 渲染当前 scene。"""
+        return render(self.scene)

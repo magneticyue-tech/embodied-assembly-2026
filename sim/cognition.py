@@ -11,6 +11,8 @@ import re
 import json
 import datetime
 
+import interfaces  # 契约来源; 不 import 任何 sim 模块, 无循环导入 (注解可选)
+
 # 任务卡 2 示例指令 (来自任务书原文)
 SAMPLE_CARD2 = (
     "先把红色方块放到黄色托盘上，再把绿色方块放到红色托盘上，"
@@ -54,3 +56,29 @@ def check_confidence(parsed, threshold=0.6):
     if not parsed.get("recognized") or parsed.get("confidence", 0) < threshold:
         return False, "任务卡识别失败，请确认任务卡位置"
     return True, None
+
+
+class RuleBasedCognition:
+    """
+    认知层的规则桩实现 (interfaces.CognitionModule)。
+
+    只做语义解析, 不输出坐标。所有逻辑委托给本模块的 module-level 函数,
+    行为与原函数逐字一致; 本类只提供"符合 Protocol 的类"外壳。
+    真机换上 ClaudeVLMCognition 时接口不变, 主流程零改动。
+    """
+
+    def parse_card1(
+        self, scene_desc: str, now_iso: str
+    ) -> "interfaces.SceneResult":
+        """任务一: 场景识别 -> 结构化描述 + 置信度 + 时间戳。"""
+        return parse_card1(scene_desc, now_iso)
+
+    def parse_card2(
+        self, card: str, now_iso: str
+    ) -> "interfaces.AssemblyPlan":
+        """任务二: 装配指令 -> {方块色->托盘色, 顺序} + 置信度 + 时间戳。"""
+        return parse_card2(card, now_iso)
+
+    def check_confidence(self, parsed, threshold: float = 0.6):
+        """置信度校验 (赛题强制): 不达标 -> (False, 失败话术)。"""
+        return check_confidence(parsed, threshold)

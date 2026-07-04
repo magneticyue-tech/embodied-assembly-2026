@@ -7,9 +7,14 @@ execution.py — 执行层 (机器人控制的仿真替身, 对应 AUBO-i5)
 不做物理动力学 (pybullet 在 py3.14 无法构建; 真机用 AUBO SDK / ARCS 仿真)。
 
 关键: AUBO-i5 机械臂精度 ±0.02mm 远高于任务需求, 故误差几乎全部来自视觉定位。
+
+拆分 (符合 interfaces 契约):
+  - SimRobot   实现 interfaces.RobotController —— 只负责【运动】, 绝不接触 ground-truth。
+  - RingEvaluator 是【仿真专属】评分器 (非任何 Protocol), 用 scene 真值算定位误差与落环。
 """
 import math
 import config as C
+import interfaces
 
 
 def offset_to_ring(offset_mm):
@@ -19,35 +24,43 @@ def offset_to_ring(offset_mm):
     return ring, bold
 
 
-class Robot:
-    def __init__(self, logger):
-        self.log = logger
+class SimRobot:
+    """实现 interfaces.RobotController: 只负责运动 (抓/放), 绝不接触 ground-truth。"""
+
+    def __init__(self, io):
+        self.io = io
         self.held = None
 
-    def pick(self, color, det_block, true_block):
-        """模拟吸盘抓取: 对准检测到的中心与旋转角。"""
-        derr = math.dist((det_block["x"], det_block["y"]),
-                         (true_block["x"], true_block["y"]))
-        aerr = abs(_fold90(det_block["deg"] - true_block["deg"]))  # 正方形 90° 对称
-        self.log(f"  [执行] AUBO-i5 移至拍照点上方 -> 对准 {color}块 "
-                 f"中心({det_block['x']:.1f},{det_block['y']:.1f})mm 角度{det_block['deg']:+.1f}° -> 吸盘抓取")
-        self.log(f"  [执行] 定位误差 {derr:.2f}mm, 角度误差 {aerr:.1f}° "
-                 f"(机械臂自身 ±0.02mm, 误差主要来自视觉)")
+    def pick(self, color, target):
+        self.io.log(f"  [执行] AUBO-i5 移至拍照点上方 -> 对准 {color}块 中心({target['x']:.1f},{target['y']:.1f})mm 角度{target['deg']:+.1f}° -> 吸盘抓取")
         self.held = color
+
+    def place(self, block_color, tray_color, target):
+        self.io.log(f"  [执行] 搬运 {block_color}块 -> {tray_color}托盘中心({target['x']:.1f},{target['y']:.1f})mm -> 释放吸盘")
+        self.held = None
+
+
+class RingEvaluator:
+    """仿真专属评分 (非 Protocol): 用 scene 真值算定位误差与同心环落环。"""
+
+    def __init__(self, scene, io):
+        self.scene = scene
+        self.io = io
+
+    def score_pick(self, color, det_block):
+        t = self.scene.blocks[color]
+        derr = math.dist((det_block['x'], det_block['y']), (t['x'], t['y']))
+        aerr = abs(_fold90(det_block['deg'] - t['deg']))
+        self.io.log(f"  [执行] 定位误差 {derr:.2f}mm, 角度误差 {aerr:.1f}° (机械臂自身 ±0.02mm, 误差主要来自视觉)")
         return derr
 
-    def place(self, block_color, tray_color, det_tray, true_tray, pick_err):
-        """模拟放置, 并按同心环读出最终偏移。"""
-        tray_err = math.dist((det_tray["x"], det_tray["y"]),
-                             (true_tray["x"], true_tray["y"]))
-        total = pick_err + tray_err          # 保守估计: 抓偏 + 托盘定位偏
+    def score_place(self, tray_color, det_slot, pick_err):
+        true_tray = self.scene.slot_table_pos(tray_color)
+        tray_err = math.dist((det_slot['x'], det_slot['y']), (true_tray['x'], true_tray['y']))
+        total = pick_err + tray_err
         ring, bold = offset_to_ring(total)
         ok = total <= C.PLACE_TOLERANCE_MM
-        self.log(f"  [执行] 搬运 {block_color}块 -> {tray_color}托盘中心"
-                 f"({det_tray['x']:.1f},{det_tray['y']:.1f})mm -> 释放吸盘")
-        self.log(f"  [评分] 放置偏移 ≈{total:.2f}mm -> 落在第 {ring} 环{bold} "
-                 f"-> {'达标' if ok else '超差'} (预算 {C.PLACE_TOLERANCE_MM}mm)")
-        self.held = None
+        self.io.log(f"  [评分] 放置偏移 ≈{total:.2f}mm -> 落在第 {ring} 环{bold} -> {'达标' if ok else '超差'} (预算 {C.PLACE_TOLERANCE_MM}mm)")
         return total, ring, ok
 
 
