@@ -25,5 +25,6 @@ This is a PPT答辩 (oral defense) competition where language quality is judged.
 - 缺失素材单独列为一类事实（"文档暂未包含X"），不强行全盘归类、不一刀切。
 - 明确区分「现有可复用素材」与「需全新补充素材」，标注来源。
 - 不制造片面/绝对化结论迎合阅读偏好。
+- 反例(CLAUDE.md):标题写成「仿真边界(答辩要诚实说明)」「关键事实(容易搞错,先记住)」「进度(四阶段)」——括号内的价值判断须去掉,只留中性标题「仿真边界」「关键事实」「进度」;正文同理,事实与价值判断分离。搬运源文档(如 README)措辞时,先套用本规则再落笔。
 
 Competition context: see [[contest-task-summary]].
