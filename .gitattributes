@@ -1,0 +1,10 @@
+# 统一换行符处理: 文本文件入库为 LF, 检出按平台。避免四人跨机器的 CRLF 噪声 diff。
+* text=auto
+
+# 二进制文件, 禁止换行符转换与合并
+*.png binary
+*.jpeg binary
+*.jpg binary
+*.pdf binary
+*.pptx binary
+*.docx binary
