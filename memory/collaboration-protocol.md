@@ -30,7 +30,10 @@ metadata:
 ## Git 约定
 
 - 远程仓库:`magneticyue-tech/embodied-assembly-2026`(私有)。协作者:Wpr-htyj、HEBE-JZH、sl3456,各自用自己的 GitHub 账号。
-- 日常循环:开工前 `git pull` → 改动 → `git add` → `git commit -m "说明"` → `git push`。
+- **分支布局**:`main` = 新仓库(系统实现,2026-07-12 起);`ppt-phase` = 旧 PPT 答辩阶段历史(原 `master`,只读归档,不再提交);两条历史无共同祖先,不做合并。
+- 日常循环:开工前 `git pull` → 改动 → `git add` → `git commit -m "说明"` → `git push`。仅在 `main` 上工作。
+- **禁止** `git pull ppt-phase` 或将 `ppt-phase` 合并进 `main`(无共同祖先,合并会把旧目录结构灌回来)。查旧文件用 `git show ppt-phase:路径`。
+- 首次克隆/换机后设置 `git config pull.rebase true`(避免四人并行时产生无意义 merge commit)。
 - 分工到不同文件,减少冲突;二进制文件(PPT/图片/PDF)git 无法合并,改前先协调。
 - 未通过评审的代码不得作为已验证成果引用(评审状态见 reviews/)。
 
