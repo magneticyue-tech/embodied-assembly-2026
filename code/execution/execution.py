@@ -341,18 +341,30 @@ class RobotCommunicator:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.settimeout(self.timeout)
 
+    def _generate_request_id(self) -> str:
+        import uuid
+        return str(uuid.uuid4())[:8]
+
     def send_command(self, cmd_dict: dict[str, Any], retry_on_fail: bool = True) -> dict[str, Any]:
         self._create_socket()
+
+        request_id = self._generate_request_id()
+        cmd_with_id = dict(cmd_dict, request_id=request_id)
 
         last_error = None
         retries = self.max_retries if retry_on_fail else 1
 
         for attempt in range(retries):
             try:
-                data = json.dumps(cmd_dict).encode("utf-8")
+                data = json.dumps(cmd_with_id, separators=(',', ':')).encode("utf-8")
                 self.socket.sendto(data, (self.host, self.port))
                 response_data, _ = self.socket.recvfrom(4096)
                 response = json.loads(response_data.decode("utf-8"))
+                
+                if response.get("request_id") != request_id:
+                    last_error = f"请求ID不匹配: 发送 {request_id}, 收到 {response.get('request_id')}"
+                    continue
+                
                 return response
 
             except socket.timeout:
@@ -416,7 +428,7 @@ def apply_args_to_config(args):
     if args.robot_port:
         config["ROBOT_PORT"] = args.robot_port
 
-    transform_config = {}
+    transform_config = dict(DEFAULT_TRANSFORM_CONFIG)
     if args.x_offset is not None:
         transform_config["x_offset"] = args.x_offset
     if args.y_offset is not None:
@@ -426,7 +438,7 @@ def apply_args_to_config(args):
     if args.scale is not None:
         transform_config["scale"] = args.scale
 
-    if transform_config:
+    if transform_config != DEFAULT_TRANSFORM_CONFIG:
         config["TRANSFORM_CONFIG"] = transform_config
 
     return config

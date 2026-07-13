@@ -32,6 +32,7 @@ import scene as S
 import camera
 import vision
 import cognition
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'execution'))
 import execution
 import interaction
 import annotate
@@ -72,6 +73,7 @@ def run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local):
     io.log(f"  [VLM] 指令解析 JSON: {parsed['sequence']}")
     io.speak("已识别装配指令，开始复述并执行")
     rings = []
+    all_ok = True
     for item in parsed["sequence"]:
         bc, tc, step = item["block_color"], item["tray_color"], item["step"]
         io.log(f"-- 第{step}步: {bc}块 -> {tc}托盘 (高亮当前步骤) --")
@@ -81,11 +83,13 @@ def run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local):
         board = vis.detect_board_pose(img)               # 重测板位姿 (依据外轮廓)
         blocks = vis.detect_blocks(img, board)           # 重测自由方块 (闭环再感知)
         if board is None or bc not in blocks:
-            io.speak(f"未定位到{bc}块或托盘板，重新感知"); continue
+            io.speak(f"未定位到{bc}块或托盘板，跳过此步"); all_ok = False; continue
         # 目标槽位置 = 板位姿 ⊕ 开局标定布局 (不重识别颜色)
         slot = vis.slot_table_pos(tc, board, slot_local)
         robot.pick(bc, blocks[bc]); pick_err = evaluator.score_pick(bc, blocks[bc])
         robot.place(bc, tc, slot); total, ring, ok2 = evaluator.score_place(tc, slot, pick_err)
+        if not ok2:
+            all_ok = False
         rings.append((step, bc, tc, total, ring))
         scene.place_block(bc, slot["x"], slot["y"], slot["deg"])  # 放上托盘(覆盖槽色)
         vis_img = annotate.draw(img, board, slot_local, blocks,
@@ -94,11 +98,46 @@ def run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local):
     io.log(f"  [界面] 各步标注图已保存至 {C.OUTPUT_DIR}/")
     io.log("  [评分汇总] " + "; ".join(
         f"第{s}步 {b}->{t} 偏移{o:.1f}mm(第{r}环)" for s, b, t, o, r in rings))
-    io.speak("任务已完成")
-    return True
+    if all_ok:
+        io.speak("任务已完成")
+    else:
+        io.speak("任务执行完成，但部分步骤存在问题")
+    return all_ok
+
+
+def create_robot(io, args):
+    run_mode = getattr(C, 'RUN_MODE', 'sim')
+    if args and args.mode:
+        run_mode = args.mode
+
+    if run_mode == "real":
+        host = getattr(C, 'ROBOT_HOST', '127.0.0.1')
+        port = getattr(C, 'ROBOT_PORT', 5000)
+        transform_config = getattr(C, 'TRANSFORM_CONFIG', execution.DEFAULT_TRANSFORM_CONFIG)
+
+        if args:
+            if args.robot_host:
+                host = args.robot_host
+            if args.robot_port:
+                port = args.robot_port
+            if args.x_offset is not None:
+                transform_config = dict(transform_config, x_offset=args.x_offset)
+            if args.y_offset is not None:
+                transform_config = dict(transform_config, y_offset=args.y_offset)
+            if args.rotation_deg is not None:
+                transform_config = dict(transform_config, rotation_deg=args.rotation_deg)
+            if args.scale is not None:
+                transform_config = dict(transform_config, scale=args.scale)
+
+        io.log(f"  [模式] 真机模式: 连接 AUBO-i5 @ {host}:{port}")
+        return execution.AuboRobot(io, transform_config=transform_config, host=host, port=port)
+    else:
+        io.log("  [模式] 仿真模式: 使用 SimRobot")
+        return execution.SimRobot(io)
 
 
 def main():
+    args = execution.parse_args()
     os.makedirs(C.OUTPUT_DIR, exist_ok=True)
 
     # 依赖装配: 主流程只依赖抽象接口, 这里注入仿真实现。
@@ -107,7 +146,7 @@ def main():
     cog = cognition.RuleBasedCognition()
     scene = S.Scene(seed=7)
     cam = camera.SimCamera(scene)
-    robot = execution.SimRobot(io)
+    robot = create_robot(io, args)
     evaluator = execution.RingEvaluator(scene, io)
 
     io.wake()

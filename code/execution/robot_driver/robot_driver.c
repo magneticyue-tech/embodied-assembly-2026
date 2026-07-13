@@ -35,9 +35,10 @@ typedef struct {
 } Pose;
 
 void send_response(int sockfd, struct sockaddr_in *client_addr, int client_len, 
-                   int success, const char *message);
+                   int success, const char *message, const char *request_id);
 int parse_pick(const char *json, char *color, Pose *pose);
 int parse_place(const char *json, char *block_color, char *tray_color, Pose *pose);
+void parse_request_id(const char *json, char *request_id);
 void handle_pick(int sockfd, struct sockaddr_in *client_addr, int client_len, 
                  const char *json);
 void handle_place(int sockfd, struct sockaddr_in *client_addr, int client_len, 
@@ -45,13 +46,28 @@ void handle_place(int sockfd, struct sockaddr_in *client_addr, int client_len,
 void print_usage(const char *prog_name);
 
 void send_response(int sockfd, struct sockaddr_in *client_addr, int client_len, 
-                   int success, const char *message) {
+                   int success, const char *message, const char *request_id) {
     char response[MAX_JSON_LEN];
-    snprintf(response, MAX_JSON_LEN, 
-             "{\"success\":%d,\"message\":\"%s\"}", 
-             success, message);
+    if (request_id && strlen(request_id) > 0) {
+        snprintf(response, MAX_JSON_LEN, 
+                 "{\"success\":%d,\"message\":\"%s\",\"request_id\":\"%s\"}", 
+                 success, message, request_id);
+    } else {
+        snprintf(response, MAX_JSON_LEN, 
+                 "{\"success\":%d,\"message\":\"%s\"}", 
+                 success, message);
+    }
     sendto(sockfd, response, strlen(response), 0, 
            (struct sockaddr*)client_addr, client_len);
+}
+
+void parse_request_id(const char *json, char *request_id) {
+    char *token = strstr(json, "\"request_id\":\"");
+    if (token) {
+        sscanf(token, "\"request_id\":\"%[^\"]\"", request_id);
+    } else {
+        request_id[0] = '\0';
+    }
 }
 
 int parse_pick(const char *json, char *color, Pose *pose) {
@@ -129,11 +145,14 @@ int parse_place(const char *json, char *block_color, char *tray_color, Pose *pos
 void handle_pick(int sockfd, struct sockaddr_in *client_addr, int client_len, 
                  const char *json) {
     char color[MAX_COLOR_LEN];
+    char request_id[33];
     Pose pose = {0};
     
     parse_pick(json, color, &pose);
+    parse_request_id(json, request_id);
     
     printf("[C-DRIVER] ==================== PICK 指令 ====================\n");
+    printf("[C-DRIVER] 请求ID: %s\n", request_id);
     printf("[C-DRIVER] 方块颜色: %s\n", color);
     printf("[C-DRIVER] 目标坐标: (%.2f, %.2f) mm\n", pose.x, pose.y);
     printf("[C-DRIVER] 目标角度: %.2f°\n", pose.deg);
@@ -145,18 +164,21 @@ void handle_pick(int sockfd, struct sockaddr_in *client_addr, int client_len,
     printf("[C-DRIVER] [SIM] 阶段4: MoveL 上抬回到安全高度...\n");
     printf("[C-DRIVER] ----------------------------------------------------\n");
     
-    send_response(sockfd, client_addr, client_len, 1, "Pick successful");
+    send_response(sockfd, client_addr, client_len, 1, "Pick successful", request_id);
 }
 
 void handle_place(int sockfd, struct sockaddr_in *client_addr, int client_len, 
                   const char *json) {
     char block_color[MAX_COLOR_LEN];
     char tray_color[MAX_COLOR_LEN];
+    char request_id[33];
     Pose pose = {0};
     
     parse_place(json, block_color, tray_color, &pose);
+    parse_request_id(json, request_id);
     
     printf("[C-DRIVER] ==================== PLACE 指令 ====================\n");
+    printf("[C-DRIVER] 请求ID: %s\n", request_id);
     printf("[C-DRIVER] 方块颜色: %s\n", block_color);
     printf("[C-DRIVER] 托盘颜色: %s\n", tray_color);
     printf("[C-DRIVER] 目标坐标: (%.2f, %.2f) mm\n", pose.x, pose.y);
@@ -169,7 +191,7 @@ void handle_place(int sockfd, struct sockaddr_in *client_addr, int client_len,
     printf("[C-DRIVER] [SIM] 阶段4: MoveL 上抬回到安全高度...\n");
     printf("[C-DRIVER] ----------------------------------------------------\n");
     
-    send_response(sockfd, client_addr, client_len, 1, "Place successful");
+    send_response(sockfd, client_addr, client_len, 1, "Place successful", request_id);
 }
 
 void print_usage(const char *prog_name) {
@@ -247,13 +269,36 @@ int main(int argc, char *argv[]) {
         printf("[C-DRIVER] 接收到数据 (%d 字节):\n", n);
         printf("[C-DRIVER] %s\n", buffer);
         
-        if (strstr(buffer, "\"cmd\":\"PICK\"") || strstr(buffer, "\"cmd\":\"pick\"")) {
-            handle_pick(sockfd, &client_addr, client_len, buffer);
-        } else if (strstr(buffer, "\"cmd\":\"PLACE\"") || strstr(buffer, "\"cmd\":\"place\"")) {
-            handle_place(sockfd, &client_addr, client_len, buffer);
+        char request_id[33];
+        parse_request_id(buffer, request_id);
+
+        char *cmd_pos = strstr(buffer, "\"cmd\"");
+        if (cmd_pos) {
+            char *colon_pos = strchr(cmd_pos + 5, ':');
+            if (colon_pos) {
+                char *val_start = colon_pos + 1;
+                while (*val_start == ' ') val_start++;
+                if (*val_start == '"') {
+                    val_start++;
+                    if (strncmp(val_start, "PICK", 4) == 0 || strncmp(val_start, "pick", 4) == 0) {
+                        handle_pick(sockfd, &client_addr, client_len, buffer);
+                    } else if (strncmp(val_start, "PLACE", 5) == 0 || strncmp(val_start, "place", 5) == 0) {
+                        handle_place(sockfd, &client_addr, client_len, buffer);
+                    } else {
+                        printf("[C-DRIVER] 错误: 未知指令\n");
+                        send_response(sockfd, &client_addr, client_len, 0, "Unknown command", request_id);
+                    }
+                } else {
+                    printf("[C-DRIVER] 错误: 指令格式错误\n");
+                    send_response(sockfd, &client_addr, client_len, 0, "Invalid command format", request_id);
+                }
+            } else {
+                printf("[C-DRIVER] 错误: 指令格式错误\n");
+                send_response(sockfd, &client_addr, client_len, 0, "Invalid command format", request_id);
+            }
         } else {
-            printf("[C-DRIVER] 错误: 未知指令\n");
-            send_response(sockfd, &client_addr, client_len, 0, "Unknown command");
+            printf("[C-DRIVER] 错误: 未找到 cmd 字段\n");
+            send_response(sockfd, &client_addr, client_len, 0, "Missing cmd field", request_id);
         }
         
         printf("\n");
