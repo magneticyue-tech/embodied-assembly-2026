@@ -1,8 +1,10 @@
 # 具身智能精密装配赛 - 执行层代码实现 PRD
 
+<!--A-->
+
 ## Overview
-- **Summary**: 实现执行层的机器人控制代码，包含 Python 接口层和 C 语言机器人驱动层，通过进程间通信实现仿真与真机的无缝切换。
-- **Purpose**: 将当前仅打印日志的仿真机器人替换为可实际控制 AUBO-i5 机械臂的执行层代码，实现真实的抓取/放置功能。
+- **Summary**: 实现执行层的机器人控制代码，包含 Python 接口层和 C 语言机器人驱动占位层，通过进程间通信保持仿真与后续真机实现的接口一致。
+- **Purpose**: 为 AUBO-i5 抓取/放置建立坐标变换、通信和失败处理框架；真实运动控制仍需接入厂商 C SDK 并完成设备联调。
 - **Target Users**: 团队成员（B 王培如）及后续集成测试人员。
 
 ## Goals
@@ -18,7 +20,6 @@
 - 视觉标定（属于感知层职责）
 - 认知层逻辑修改
 - 交互层修改
-- 主流程修改（main.py）
 - 硬件部署与调试
 
 ## Background & Context
@@ -36,7 +37,7 @@
 - **FR-6**: 支持仿真/真机模式配置切换
 
 ## Non-Functional Requirements
-- **NFR-1**: 接口调用响应时间 < 100ms（不含运动时间）
+- **NFR-1**: 接口调用响应时间目标 < 100ms（不含运动时间）；当前未在真实 SDK 与设备环境测量
 - **NFR-2**: 代码模块化，便于后续替换为真实 SDK
 - **NFR-3**: 错误处理完善，返回明确的错误信息
 - **NFR-4**: 日志记录完整，便于调试
@@ -47,7 +48,7 @@
 - **Architecture**: 必须实现 interfaces.RobotController 协议
 
 ## Assumptions
-- AUBO C SDK 接口已知（moveJ, moveL, setIO 等）
+- AUBO C SDK 版本与具体函数签名将在设备联调前确认
 - 坐标变换参数通过配置文件提供
 - 通信协议基于 UDP/TCP
 
@@ -80,8 +81,8 @@
 ### AC-5: 仿真模式与真机模式切换
 - **Given**: 配置文件设置不同模式
 - **When**: 运行 main.py
-- **Then**: 根据配置自动切换使用 SimRobot 或 AuboRobot
-- **Verification**: `human-judgment`
+- **Then**: 仿真模式使用 SimRobot；真机感知与坐标标定未就绪时安全拒绝启动，两个安全条件完成后才允许使用 AuboRobot
+- **Verification**: `programmatic`（安全门）+ `human-judgment`（真实设备）
 
 ## Open Questions
 - [ ] AUBO C SDK 的具体函数签名（需查阅官方文档）

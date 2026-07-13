@@ -22,6 +22,7 @@ config.py — 全局配置与坐标系约定
   不依据内部彩色中心 (内部中心会被放上的方块覆盖)。
 - 装配时: 重测板位姿 + 开局标定布局 -> 计算各色槽当前位置, 不重新识别颜色。
 """
+# <!--A-->
 
 # 6 种颜色 (赛题给定: 红橙黄绿蓝紫)
 COLORS = ["red", "orange", "yellow", "green", "blue", "purple"]
@@ -74,3 +75,10 @@ BLOCK_ROT_DEG = 35.0
 PLACE_TOLERANCE_MM = 5.0
 
 OUTPUT_DIR = "output"
+
+# ---- 真机安全门禁 ----
+# sim/main.py 当前仍使用 SimCamera 与仿真正射坐标。完成工业相机接入、手眼/平面
+# 标定及现场验证前，不得把这些坐标发送给真实机械臂。
+RUN_MODE = "sim"
+REAL_PERCEPTION_READY = False
+REAL_TRANSFORM_CALIBRATED = False

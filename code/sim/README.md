@@ -14,7 +14,7 @@
 | `scene.py` `camera.py` | 仿真台面与相机采集(旋转方块 + 同心环托盘) |
 | `vision.py` | 视觉:HSV 分割 → minAreaRect → 单应反投影(实现 VisionModule) |
 | `cognition.py` | 认知层规则桩(后续替换为真实 VLM 调用) |
-| `execution.py` | 执行层动作桩 + 仿真专属 RingEvaluator 评分 |
+| `../execution/execution.py` | 执行层动作桩 + 真机通信 + 仿真专属 RingEvaluator 评分 |
 | `interaction.py` | 交互层控制台桩(带时间戳日志落盘) |
 | `annotate.py` | 可视化标注(识别框/坐标/当前步骤高亮) |
 | `main.py` | 双任务状态机,依赖注入各模块 |

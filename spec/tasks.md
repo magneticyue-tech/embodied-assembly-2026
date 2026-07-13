@@ -1,6 +1,8 @@
 # 具身智能精密装配赛 - 执行层实现计划
 
-## [ ] Task 1: 坐标变换模块实现
+<!--A-->
+
+## [x] Task 1: 坐标变换模块实现
 - **Priority**: high
 - **Depends On**: None
 - **Description**: 
@@ -13,7 +15,7 @@
   - `programmatic` TR-1.2: 变换结果与手动计算一致（使用已知变换矩阵）
 - **Notes**: 变换矩阵参数后续需实际标定，当前提供默认值
 
-## [ ] Task 2: Python 端 AuboRobot 类实现
+## [x] Task 2: Python 端 AuboRobot 类实现
 - **Priority**: high
 - **Depends On**: Task 1, Task 3
 - **Description**: 
@@ -27,7 +29,7 @@
   - `human-judgment` TR-2.3: 代码结构清晰，符合项目编码规范
 - **Notes**: 保持与 SimRobot 相同的接口，便于 main.py 切换
 
-## [ ] Task 3: 进程间通信协议实现
+## [x] Task 3: 进程间通信协议实现
 - **Priority**: high
 - **Depends On**: None
 - **Description**: 
@@ -41,7 +43,7 @@
   - `programmatic` TR-3.3: 网络异常时能正确处理并返回错误
 - **Notes**: 使用 JSON 格式序列化指令，便于调试
 
-## [ ] Task 4: C 语言机器人驱动实现（占位桩）
+## [x] Task 4: C 语言机器人驱动实现（占位桩）
 - **Priority**: high
 - **Depends On**: Task 3
 - **Description**: 
@@ -56,7 +58,7 @@
   - `human-judgment` TR-4.3: C 代码结构清晰，便于后续替换为真实 SDK
 - **Notes**: 当前为占位桩实现，后续需替换为真实 AUBO SDK 调用
 
-## [ ] Task 5: 模式切换配置实现
+## [x] Task 5: 模式切换配置实现
 - **Priority**: medium
 - **Depends On**: Task 2
 - **Description**: 
@@ -65,22 +67,22 @@
   - 实现模式切换逻辑
 - **Acceptance Criteria Addressed**: AC-5
 - **Test Requirements**:
-  - `human-judgment` TR-5.1: 修改 config.py 的 mode 配置后，main.py 能正确切换模式
+  - `programmatic` TR-5.1: 仿真模式正常运行；真机条件未就绪时 main.py 安全拒绝启动
   - `human-judgment` TR-5.2: 切换过程无需修改其他代码
-- **Notes**: 最小化对 main.py 的修改
+- **Notes**: 真机相机和坐标标定完成前保持安全门关闭
 
-## [ ] Task 6: 错误处理与日志完善
+## [x] Task 6: 错误处理与日志完善
 - **Priority**: medium
 - **Depends On**: Task 2, Task 4
 - **Description**: 
   - 实现统一的错误处理机制
   - 完善日志记录（执行状态、错误信息、坐标数据）
-  - 实现执行失败时的重试逻辑
+  - 通信超时时可重发同一请求；驱动明确返回失败时安全停止，不重复执行物理动作
 - **Acceptance Criteria Addressed**: NFR-3, NFR-4
 - **Test Requirements**:
   - `human-judgment` TR-6.1: 执行失败时能返回明确的错误信息
   - `human-judgment` TR-6.2: 日志记录完整，包含时间戳和关键数据
-- **Notes**: 重试逻辑可配置最大重试次数
+- **Notes**: 重发复用同一 request_id，C 驱动在进程存活期间按 request_id 幂等处理
 
 ## [ ] Task 7: 集成测试验证
 - **Priority**: high
@@ -95,4 +97,4 @@
   - `programmatic` TR-7.1: python main.py 能正常运行完成两个任务
   - `programmatic` TR-7.2: 输出日志包含完整的执行记录
   - `human-judgment` TR-7.3: 整体流程符合预期
-- **Notes**: 测试使用仿真模式，验证接口正确性
+- **Notes**: 测试使用仿真模式，验证接口正确性。当前已完成软件仿真、Python↔C UDP 与 C 编译测试；真实 SDK、设备和 Python 3.11 环境仍待验证。

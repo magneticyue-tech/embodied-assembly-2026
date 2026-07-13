@@ -7,12 +7,14 @@ metadata:
 
 # 协作协议
 
+<!--A-->
+
 ## 分工(来源:materials/official/团队分工.txt)
 
 | 角色 | 成员 | 职责 | 主要目录 |
 |---|---|---|---|
 | A | 苏朗 | 视觉感知与大模型环境搭建:图像采集、目标检测、坐标输出 | code/sim/vision.py, camera.py, 视觉标定 |
-| B | 王培如 | 虚拟机械臂控制:点位标定、抓取放置、容错重试 | code/sim/execution.py, ARCS 仿真程序 |
+| B | 王培如 | 虚拟机械臂控制:点位标定、抓取放置、失败安全停止 | code/execution/execution.py, code/execution/robot_driver/, ARCS 仿真程序 |
 | C | 王俊涵 | 认知 Agent 与交互界面:语音交互、任务解析、业务调度 | code/sim/cognition.py, interaction.py, main.py |
 | D | 王乐 | 基础平台后端:通信中转、流媒体、日志存储 | 通信/日志基础设施, interfaces.py 契约维护 |
 
@@ -29,7 +31,7 @@ metadata:
 
 ## Git 约定
 
-- 远程仓库:`magneticyue-tech/embodied-assembly-2026`(私有)。协作者:Wpr-htyj、HEBE-JZH、sl3456,各自用自己的 GitHub 账号。
+- 远程仓库:`magneticyue-tech/embodied-assembly-2026`(公开)。协作者:Wpr-htyj、HEBE-JZH、sl3456,各自用自己的 GitHub 账号。
 - **分支布局**:`main` = 新仓库(系统实现,2026-07-12 起);`ppt-phase` = 旧 PPT 答辩阶段历史(原 `master`,只读归档,不再提交);两条历史无共同祖先,不做合并。
 - 日常循环:开工前 `git pull` → 改动 → `git add` → `git commit -m "说明"` → `git push`。仅在 `main` 上工作。
 - **禁止** `git pull ppt-phase` 或将 `ppt-phase` 合并进 `main`(无共同祖先,合并会把旧目录结构灌回来)。查旧文件用 `git show ppt-phase:路径`。

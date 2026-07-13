@@ -1,8 +1,10 @@
 # 执行层 (Execution Layer)
 
+<!--A-->
+
 ## 概述
 
-执行层负责控制 AUBO-i5 机械臂完成抓取和放置任务，是具身智能精密装配系统的核心执行单元。
+执行层提供抓取和放置接口、坐标变换及 Python↔C 通信；当前 C 层为占位桩，真实 AUBO-i5 控制需接入厂商 SDK。
 
 ## 架构设计
 
@@ -13,7 +15,7 @@
 │                                                                 │
 │   Python 层 (execution.py)                                      │
 │   ├── SimRobot           # 仿真模式机器人控制器                   │
-│   ├── AuboRobot          # 真机模式机器人控制器                   │
+│   ├── AuboRobot          # 真机模式接口封装                       │
 │   ├── RobotCommunicator  # UDP 通信协议模块                       │
 │   ├── table_to_robot     # 坐标变换函数                          │
 │   └── RingEvaluator      # 仿真评分器                            │
@@ -43,7 +45,7 @@
 - `place(block_color, tray_color, target)`：模拟放置动作，打印日志
 - 不进行实际运动，用于验证逻辑正确性
 
-#### AuboRobot（真机模式）
+#### AuboRobot（真机模式接口）
 - `pick(color, target)`：坐标变换 → 发送 PICK 指令 → 接收响应
 - `place(block_color, tray_color, target)`：坐标变换 → 发送 PLACE 指令 → 接收响应
 - 通过 UDP 与 C 驱动进程通信
@@ -53,15 +55,18 @@
 
 - **`RobotCommunicator`**：UDP 通信模块
 - 协议格式：JSON
-- 指令：`{"cmd": "PICK", "color": "...", "x": ..., "y": ..., "deg": ...}`
-- 响应：`{"success": true/false, "message": "..."}`
-- 特性：超时处理、自动重试（默认 3 次）
+- 指令：`{"cmd":"PICK","color":"...","x":...,"y":...,"deg":...,"request_id":"..."}`
+- 响应：`{"success":true/false,"message":"...","request_id":"..."}`
+- 特性：超时处理、自动重试（默认 3 次）；同一次调用的重试复用一个 `request_id`
+- C 驱动缓存最近 128 个请求结果；重复请求只回放响应，不重复执行机械臂动作
+- 驱动返回失败时，`AuboRobot` 抛出 `RobotExecutionError`，主流程安全停止并提示申请重抽任务卡
 
 ### 4. C 语言驱动
 
 - **`robot_driver.c`**：AUBO-i5 驱动占位桩
 - 监听 UDP 端口（默认 5000）
 - 解析 PICK/PLACE 指令
+- 严格校验必填字段、颜色枚举、有限数值和 `request_id`
 - 打印执行日志
 - 返回执行结果
 - 支持命令行参数指定端口
@@ -71,7 +76,11 @@
 | 模式 | 机器人实现 | 用途 |
 |------|------------|------|
 | `sim` | SimRobot | 仿真验证 |
-| `real` | AuboRobot | 真机控制 |
+| `real` | AuboRobot | 真机接口（受安全门禁保护，C 驱动仍为占位桩） |
+
+`code/sim/main.py` 仍使用 `SimCamera`。只有真实相机链路和坐标变换完成联调，并将
+`REAL_PERCEPTION_READY`、`REAL_TRANSFORM_CALIBRATED` 显式设为 `True` 后，入口才允许
+创建 `AuboRobot`。门禁未通过时程序直接终止，不向机械臂发送坐标。
 
 ### 6. 外部配置支持
 
@@ -141,7 +150,11 @@ class RobotController(Protocol):
 ### 编译 C 驱动
 ```bash
 cd code/execution/robot_driver
-gcc robot_driver.c -o robot_driver
+# Linux / POSIX
+gcc -std=c11 -Wall -Wextra -Werror robot_driver.c -o robot_driver
+
+# Windows / MinGW-w64
+gcc -std=c11 -Wall -Wextra -Werror robot_driver.c -lws2_32 -o robot_driver.exe
 ```
 
 ### 运行 C 驱动
@@ -163,6 +176,15 @@ robot = execution.SimRobot(io)
 # 真机模式
 robot = execution.AuboRobot(io, host="192.168.1.100", port=5000)
 ```
+
+### 运行测试
+
+```bash
+python -m unittest discover -s code/tests -v
+```
+
+若环境中存在 GCC（Windows 下支持 MinGW-w64），测试会额外以
+`-Wall -Wextra -Werror` 编译并运行 `robot_driver_test.c`；没有 GCC 时该项明确标记为跳过。
 
 ## 待完成工作
 
