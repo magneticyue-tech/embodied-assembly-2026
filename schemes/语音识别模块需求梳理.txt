@@ -9,10 +9,8 @@
 6. 后端调度模块
 
 
-
-| --- | --- | --- | --- | --- | --- |
-| 名称 | 输入 | 操作 | 输出 | 异常 | 依赖 |
-| 唤醒 | 语音指令"小具同学" | void | json |   | 15s内唤醒 |
-| 启动 | 语音指令"开始" | void | json | 超时 | 15s内唤醒 |
-| 复位 | 语音指令"复位" | void | json | 超时 | 15s内唤醒 |
-| 重试 | 语音指令"重试" | void | json | 超时 | 15s内唤醒 |
+语音识别模块
+| --- | --- | --- | --- | --- | --- | --- |
+| 名称 | 函数 | 输入 | 操作 | 输出 | 异常 | 依赖 |
+| 唤醒 | detect_wake_word | 语音指令"小具同学" | void | json (VoiceEvent, command=WAKE) |   | 15s内唤醒 |
+| 启动 | listen_command | 语音指令"开始/复位/重试" | void | json (VoiceEvent, command=START/RESET/RETRY) | 超时(code=5001) | 15s内唤醒 |

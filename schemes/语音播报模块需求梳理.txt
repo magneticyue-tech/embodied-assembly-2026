@@ -10,8 +10,11 @@
 
 
 
-| --- | --- | --- | --- | --- | --- |
-| 名称 | 输入 | 操作 | 输出 | 异常 | 依赖 |
-| 语音合成 | json | 调用TTS合成语音 | 是否成功/音频 | 合成失败 | TTS |
-| 语音播报 | 音频 | 播放合成语音 | 音频 | 播放失败 | 语音合成 |
-| 任务完成 | json | 播放“
+| --- | --- | --- | --- | --- | --- | --- |
+| 名称 | 函数 | 输入 | 操作 | 输出 | 异常 | 依赖 |
+| 语音合成 | synthesize | json (SpeechRequest, type=TTS) | 调用TTS合成语音 | 是否成功/音频 | 合成失败 (code=4001) | TTS |
+| 语音播报 | play_audio | 音频 | 播放合成语音 | 音频 | 播放失败 (code=4001) | 语音合成 |
+| 已就绪 | play_ready | json (SpeechRequest, preset_id=READY) | 播放"我已就绪，请下达指令" | 音频 | 播放失败 (code=4001) | 预制语音 |
+| 任务完成 | play_task_done | json (SpeechRequest, preset_id=TASK_DONE) | 播放"任务已完成"| 音频 | 播放失败 (code=4001) | 预制语音 |
+| 所有任务完成 | play_all_done | json (SpeechRequest, preset_id=ALL_DONE) | 播放"两个任务均已完成"| 音频 | 播放失败 (code=4001) | 预制语音 |
+| 任务卡识别失败 | play_card_fail | json (SpeechRequest, preset_id=CARD_FAIL) | 播放"任务卡识别失败，请确认任务卡位置" | 音频 | 播放失败 (code=4001) | 预制语音 |
