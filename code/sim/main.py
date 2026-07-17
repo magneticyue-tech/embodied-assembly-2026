@@ -2,7 +2,7 @@
 main.py — 主控状态机 (端到端跑通赛题全流程)
 
 流程:
-  语音唤醒 -> 任务卡识别(VLM) -> 语音复述 -> [闭环装配 6 块] -> 完成播报。
+  语音唤醒 -> 任务卡解析(当前为规则桩) -> 语音复述 -> [闭环装配 6 块] -> 完成播报。
 
 依赖注入 + 面向接口:
 - 主流程只依赖 interfaces 中的抽象契约, 通过构造把具体实现注入:
@@ -18,6 +18,7 @@ main.py — 主控状态机 (端到端跑通赛题全流程)
 运行: cd sim && python main.py
 产物: output/ 标注图 + parse_log_*.txt (带时间戳)。
 """
+# <!--A-->
 import os
 import sys
 import cv2
@@ -49,13 +50,17 @@ def run_task1(vis, cog, cam, io, slot_local):
     io.speak("我已就绪，请下达指令")
     img = cam.capture()
     board = vis.detect_board_pose(img)
+    if board is None:
+        io.log("  [感知] 未定位到托盘板，任务一终止")
+        io.speak("未定位到托盘板，请检查工作区")
+        return False
     blocks = vis.detect_blocks(img, board)
     desc = f"待装配区检测到{len(blocks)}个方块, 装配区检测到1块托盘板(含{len(slot_local)}个色槽)"
     parsed = cog.parse_card1(desc, io.now())
     ok, errmsg = cog.check_confidence(parsed)
     if not ok:
         io.speak(errmsg); return False
-    io.log(f"  [VLM] 场景解析: {parsed['description']} (conf={parsed['confidence']})")
+    io.log(f"  [认知/规则桩] 场景解析: {parsed['description']} (conf={parsed['confidence']})")
     vis_img = annotate.draw(img, board, slot_local, blocks, "Task1 Scene Recognition")
     io.log(f"  [界面] 标注图 -> {save(vis_img, 'task1_scene.png')}")
     io.speak(f"场景识别完成，{desc}")
@@ -70,7 +75,7 @@ def run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local):
     ok, errmsg = cog.check_confidence(parsed)
     if not ok:
         io.speak(errmsg); return False
-    io.log(f"  [VLM] 指令解析 JSON: {parsed['sequence']}")
+    io.log(f"  [认知/规则桩] 指令解析 JSON: {parsed['sequence']}")
     io.speak("已识别装配指令，开始复述并执行")
     rings = []
     all_ok = True
@@ -83,11 +88,23 @@ def run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local):
         board = vis.detect_board_pose(img)               # 重测板位姿 (依据外轮廓)
         blocks = vis.detect_blocks(img, board)           # 重测自由方块 (闭环再感知)
         if board is None or bc not in blocks:
-            io.speak(f"未定位到{bc}块或托盘板，跳过此步"); all_ok = False; continue
+            all_ok = False
+            io.log(f"  [安全停止] 未定位到{bc}块或托盘板，终止本次装配")
+            io.speak(f"未定位到{bc}块或托盘板，请停止操作并申请重抽任务卡")
+            break
         # 目标槽位置 = 板位姿 ⊕ 开局标定布局 (不重识别颜色)
         slot = vis.slot_table_pos(tc, board, slot_local)
-        robot.pick(bc, blocks[bc]); pick_err = evaluator.score_pick(bc, blocks[bc])
-        robot.place(bc, tc, slot); total, ring, ok2 = evaluator.score_place(tc, slot, pick_err)
+        try:
+            robot.pick(bc, blocks[bc])
+            pick_err = evaluator.score_pick(bc, blocks[bc])
+            robot.place(bc, tc, slot)
+        except execution.RobotExecutionError as exc:
+            all_ok = False
+            io.log(f"  [安全停止] {exc}")
+            io.speak("机械臂执行失败，请停止操作并申请重抽任务卡")
+            break
+
+        total, ring, ok2 = evaluator.score_place(tc, slot, pick_err)
         if not ok2:
             all_ok = False
         rings.append((step, bc, tc, total, ring))
@@ -111,6 +128,15 @@ def create_robot(io, args):
         run_mode = args.mode
 
     if run_mode == "real":
+        if not getattr(C, "REAL_PERCEPTION_READY", False):
+            raise RuntimeError(
+                "真机模式已阻止: 当前入口仍使用 SimCamera，尚未接入真实相机链路"
+            )
+        if not getattr(C, "REAL_TRANSFORM_CALIBRATED", False):
+            raise RuntimeError(
+                "真机模式已阻止: 台面到机器人基座的坐标变换尚未完成标定"
+            )
+
         host = getattr(C, 'ROBOT_HOST', '127.0.0.1')
         port = getattr(C, 'ROBOT_PORT', 5000)
         transform_config = getattr(C, 'TRANSFORM_CONFIG', execution.DEFAULT_TRANSFORM_CONFIG)
@@ -149,24 +175,44 @@ def main():
     robot = create_robot(io, args)
     evaluator = execution.RingEvaluator(scene, io)
 
-    io.wake()
+    try:
+        io.wake()
 
-    # 开局一次性标定: 板位姿 + 颜色->板局部坐标 (此时无遮挡)
-    img0 = cam.capture()
-    board0 = vis.detect_board_pose(img0)
-    slot_local = vis.calibrate_slots(img0, board0)
-    io.log(f"  [标定] 检测托盘板位姿 + 标定 {len(slot_local)} 个色槽布局 (开局一次, 颜色固定)")
-    save(annotate.draw(img0, board0, slot_local, vis.detect_blocks(img0, board0),
-                       "Initial Scene + Slot Calibration"), "00_initial_scene.png")
-    io.log(f"  [界面] 初始场景 -> {C.OUTPUT_DIR}/00_initial_scene.png")
+        # 开局一次性标定: 板位姿 + 颜色->板局部坐标 (此时无遮挡)
+        img0 = cam.capture()
+        board0 = vis.detect_board_pose(img0)
+        if board0 is None:
+            io.log("  [标定失败] 未定位到托盘板")
+            io.speak("未定位到托盘板，请检查工作区")
+            return 1
 
-    r1 = run_task1(vis, cog, cam, io, slot_local)
-    r2 = run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local)
-    if r1 and r2:
-        io.speak("两个任务均已完成")
-    io.flush()
-    print(f"\n解析日志(带时间戳)已保存: {io.path}")
+        slot_local = vis.calibrate_slots(img0, board0)
+        missing_slots = set(C.COLORS).difference(slot_local)
+        if missing_slots:
+            missing = ", ".join(sorted(missing_slots))
+            io.log(f"  [标定失败] 未识别全部色槽，缺少: {missing}")
+            io.speak("托盘色槽标定不完整，请检查工作区")
+            return 1
+
+        io.log(f"  [标定] 检测托盘板位姿 + 标定 {len(slot_local)} 个色槽布局 (开局一次, 颜色固定)")
+        save(annotate.draw(img0, board0, slot_local, vis.detect_blocks(img0, board0),
+                           "Initial Scene + Slot Calibration"), "00_initial_scene.png")
+        io.log(f"  [界面] 初始场景 -> {C.OUTPUT_DIR}/00_initial_scene.png")
+
+        r1 = run_task1(vis, cog, cam, io, slot_local)
+        r2 = run_task2(scene, vis, cog, robot, evaluator, cam, io, slot_local)
+        if r1 and r2:
+            io.speak("两个任务均已完成")
+            return 0
+
+        io.speak("任务未全部完成，请检查日志")
+        return 1
+    finally:
+        if hasattr(robot, "close"):
+            robot.close()
+        io.flush()
+        print(f"\n解析日志(带时间戳)已保存: {io.path}")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -11,7 +11,7 @@ execution.py — 执行层 (机器人控制的仿真替身, 对应 AUBO-i5)
 
 拆分 (符合 interfaces 契约):
   - SimRobot 实现 interfaces.RobotController — 只负责运动, 不接触 ground-truth。
-  - AuboRobot 实现 interfaces.RobotController — AUBO-i5 真机控制器, 通过 UDP 与 C 进程通信。
+  - AuboRobot 实现 interfaces.RobotController — 真机接口封装,通过 UDP 与当前 C 驱动占位桩通信。
   - RingEvaluator 是仿真专属评分器 (不属于任何 Protocol), 用 scene 真值计算
     定位误差与落环。
   - TransformConfig / table_to_robot / robot_to_table — 坐标变换模块。
@@ -25,13 +25,19 @@ execution.py — 执行层 (机器人控制的仿真替身, 对应 AUBO-i5)
   3. 通过函数参数传入
 
 """
+# <!--A-->
 import math
 import json
 import socket
 import time
 import argparse
 import sys
-sys.path.append('../sim')
+import uuid
+from pathlib import Path
+
+SIM_DIR = Path(__file__).resolve().parents[1] / "sim"
+if str(SIM_DIR) not in sys.path:
+    sys.path.insert(0, str(SIM_DIR))
 import config as C
 import interfaces
 from typing import TypedDict, Optional, Any
@@ -64,6 +70,20 @@ DEFAULT_TRANSFORM_CONFIG: TransformConfig = {
 }
 
 
+def _validate_transform_config(config: TransformConfig) -> None:
+    """校验坐标变换参数，避免向机械臂发送退化或非有限坐标。"""
+    required = {"x_offset", "y_offset", "rotation_deg", "scale"}
+    missing = required.difference(config)
+    if missing:
+        raise ValueError(f"坐标变换配置缺少字段: {', '.join(sorted(missing))}")
+
+    for key in required:
+        if not math.isfinite(config[key]):
+            raise ValueError(f"坐标变换参数 {key} 必须为有限数值")
+    if config["scale"] <= 0:
+        raise ValueError("坐标变换参数 scale 必须大于 0")
+
+
 def table_to_robot(x: float, y: float, deg: float, config: TransformConfig) -> tuple[float, float, float]:
     """
     将台面坐标系下的位姿转换为机器人基座坐标系。
@@ -80,6 +100,10 @@ def table_to_robot(x: float, y: float, deg: float, config: TransformConfig) -> t
     Returns:
         tuple[float, float, float]: 机器人基座坐标系下的 (x, y, deg)
     """
+    _validate_transform_config(config)
+    if not all(math.isfinite(value) for value in (x, y, deg)):
+        raise ValueError("待转换位姿必须为有限数值")
+
     tx = x + config["x_offset"]
     ty = y + config["y_offset"]
 
@@ -111,6 +135,10 @@ def robot_to_table(x: float, y: float, deg: float, config: TransformConfig) -> t
     Returns:
         tuple[float, float, float]: 台面坐标系下的 (x, y, deg)
     """
+    _validate_transform_config(config)
+    if not all(math.isfinite(value) for value in (x, y, deg)):
+        raise ValueError("待转换位姿必须为有限数值")
+
     rx = x / config["scale"]
     ry = y / config["scale"]
 
@@ -147,7 +175,7 @@ class SimRobot:
     实现 interfaces.RobotController: 仿真机器人控制器 (只负责运动, 不接触 ground-truth)。
 
     本类是仿真模式下的机器人实现，只打印执行日志，不进行实际运动。
-    用于验证逻辑正确性，与 AuboRobot 接口完全一致，便于模式切换。
+    用于验证主流程，并与 AuboRobot 实现同一接口；真机行为仍需联调验证。
     """
 
     def __init__(self, io):
@@ -168,7 +196,7 @@ class SimRobot:
             color: 方块颜色 (red/orange/yellow/green/blue/purple)
             target: 目标位姿 (BlockPose)，包含 x, y, deg, uv
         """
-        self.io.log(f"  [执行] AUBO-i5 移至拍照点上方 -> 对准 {color}块 中心({target['x']:.1f},{target['y']:.1f})mm 角度{target['deg']:+.1f}° -> 吸盘抓取")
+        self.io.log(f"  [执行/仿真] 移至拍照点上方 -> 对准 {color}块 中心({target['x']:.1f},{target['y']:.1f})mm 角度{target['deg']:+.1f}° -> 模拟吸盘抓取")
         self.held = color
 
     def place(self, block_color, tray_color, target):
@@ -180,16 +208,25 @@ class SimRobot:
             tray_color: 托盘颜色
             target: 目标位姿 (SlotPose)，包含 x, y, deg, uv
         """
-        self.io.log(f"  [执行] 搬运 {block_color}块 -> {tray_color}托盘中心({target['x']:.1f},{target['y']:.1f})mm -> 释放吸盘")
+        self.io.log(f"  [执行/仿真] 搬运 {block_color}块 -> {tray_color}托盘中心({target['x']:.1f},{target['y']:.1f})mm -> 模拟释放吸盘")
         self.held = None
+
+
+class RobotExecutionError(RuntimeError):
+    """机械臂命令未被驱动成功执行。"""
+
+    def __init__(self, command: str, message: str):
+        super().__init__(f"{command} 执行失败: {message}")
+        self.command = command
+        self.message = message
 
 
 class AuboRobot:
     """
-    实现 interfaces.RobotController: AUBO-i5 真机控制器, 通过 UDP 与 C 进程通信。
+    实现 interfaces.RobotController: AUBO-i5 真机接口封装,通过 UDP 与 C 进程通信。
 
-    本类是真机模式下的机器人实现，通过 UDP 协议与 C 语言驱动进程通信，
-    将指令发送给真实的 AUBO-i5 机械臂执行。
+    本类是真机模式下的机器人接口实现，通过 UDP 协议与 C 语言驱动进程通信。
+    当前 C 驱动仍为占位桩，接入厂商 SDK 后才会向 AUBO-i5 机械臂下发运动指令。
 
     通信流程:
         1. 接收视觉模块的目标位姿（台面坐标系）
@@ -226,6 +263,7 @@ class AuboRobot:
                 self.transform_config = DEFAULT_TRANSFORM_CONFIG
         else:
             self.transform_config = transform_config
+        _validate_transform_config(self.transform_config)
 
         if host is None:
             if hasattr(C, 'ROBOT_HOST'):
@@ -259,7 +297,9 @@ class AuboRobot:
             self.io.log(f"  [执行] PICK 成功: {response.get('message', '')}")
             self.held = color
         else:
-            self.io.log(f"  [执行] PICK 失败: {response.get('message', '未知错误')}")
+            message = response.get('message', '未知错误')
+            self.io.log(f"  [执行] PICK 失败: {message}")
+            raise RobotExecutionError("PICK", message)
 
     def place(self, block_color, tray_color, target):
         """
@@ -279,7 +319,9 @@ class AuboRobot:
             self.io.log(f"  [执行] PLACE 成功: {response.get('message', '')}")
             self.held = None
         else:
-            self.io.log(f"  [执行] PLACE 失败: {response.get('message', '未知错误')}")
+            message = response.get('message', '未知错误')
+            self.io.log(f"  [执行] PLACE 失败: {message}")
+            raise RobotExecutionError("PLACE", message)
 
     def close(self):
         """关闭与 C 进程的通信连接。"""
@@ -342,8 +384,7 @@ class RobotCommunicator:
             self.socket.settimeout(self.timeout)
 
     def _generate_request_id(self) -> str:
-        import uuid
-        return str(uuid.uuid4())[:8]
+        return uuid.uuid4().hex
 
     def send_command(self, cmd_dict: dict[str, Any], retry_on_fail: bool = True) -> dict[str, Any]:
         self._create_socket()
@@ -360,11 +401,17 @@ class RobotCommunicator:
                 self.socket.sendto(data, (self.host, self.port))
                 response_data, _ = self.socket.recvfrom(4096)
                 response = json.loads(response_data.decode("utf-8"))
-                
+
+                if not isinstance(response, dict):
+                    last_error = "响应格式错误, JSON 顶层必须是对象"
+                    continue
                 if response.get("request_id") != request_id:
                     last_error = f"请求ID不匹配: 发送 {request_id}, 收到 {response.get('request_id')}"
                     continue
-                
+                if not isinstance(response.get("success"), bool):
+                    last_error = "响应格式错误, success 必须为布尔值"
+                    continue
+
                 return response
 
             except socket.timeout:
