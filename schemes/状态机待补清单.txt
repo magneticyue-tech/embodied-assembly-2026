@@ -1,0 +1,60 @@
+状态机待补清单
+
+来源: 编写 code/sim/dispatcher.py (后端调度状态机) 时撞到的、数据字典与需求表尚未定义的缺口。
+用途: 全队核对后回填数据字典.txt / 各模块需求表; 回填前 dispatcher.py 内以 TODO(待补) 占位。
+每条标注: 事实 (文档现状) / 缺口 (缺什么) / 临时处理 (骨架当前怎么占位) / 待定 (需谁定)。
+
+
+#1 错误码的重试上限与升级策略
+- 事实: 数据字典 0.4 列了错误码与三级处置 (模块级重试/调度级恢复/整任务重抽), 末尾写"决策点: 各 code 自动重试上限设为几次? 超上限升级重抽还是终止?"未定。
+- 缺口: 每个 code 的 MODULE_RETRY 次数、DISPATCH_RECOVER 次数、超限后动作。
+- 临时处理: MODULE_RETRY_LIMIT=2、DISPATCH_RECOVER_LIMIT=2, classify_disposition 按 code 硬编码分级。
+- 待定: 全队 + 赛题规则 (D 主, B/A/C 核对各自 code 的可重试性)。
+
+#2 后端调度模块.txt 末行残缺 ("物块抓取 | 物块中心坐标/")
+- 事实: 该行原文截断, 仅剩"物块抓取 | 物块中心坐标/"。已在表中标 [残缺行·待补], 函数名暂定 plan_block_pick。
+- 缺口: 完整输入 (除物块中心坐标外还含什么: 物块旋转角? 当前眼坐标? 抓取高度?)、操作、输出 (手系抓取位姿?)、依赖。
+- 临时处理: dispatcher 约定 plan_block_pick(detection, eye) -> Pose(frame=hand)。
+- 待定: D (后端调度模块表作者)。
+
+#3 放置位姿规划 (无对应需求行)
+- 事实: 后端调度表有三种"视野"解算, 但无"由托盘检测 -> 手系放置位姿"的行。
+- 缺口: 放置目标位姿谁产出、输入 (托盘检测 + 目标槽色 + 当前眼位姿?)、放置高度约定。
+- 临时处理: dispatcher 约定 plan_slot_place(tray, slot_color, eye) -> Pose(frame=hand)。
+- 待定: D。
+
+#4 眼系/手系 与 仿真 mm+deg+uv 两套坐标的桥接
+- 事实: 数据字典 1.1 Pose 用手系/眼系 (m + rad); interfaces.py 的 Pose 用台面 mm + deg + 像素 uv。dispatcher 按数据字典规格写。
+- 缺口: 两套类型在集成时如何转换、谁负责 (视野解算产出眼系, eye_to_hand 转手系交机械臂; 但仿真执行层现用 mm)。
+- 临时处理: dispatcher 全程用数据字典 Pose, 与 execution.py 未打通。
+- 待定: D + B (执行层)。
+
+#5 两张任务卡的推进方式
+- 事实: 流程.txt 仅一行 (需求梳理→...→迭代), 未描述"一次比赛跑几张卡、卡间如何切换"。赛题为任务一 + 任务二两项。
+- 缺口: 第二张卡靠再次 START 触发, 还是第一张完成后自动继续识别下一张?
+- 临时处理: 完成一张后回 LISTENING, 等下一个 START。
+- 待定: C (交互流程) + 赛题规则。
+
+#6 执行中途收到 RESET / 复位语义
+- 事实: 数据字典 4.1 有 RESET 命令; 机械臂表有 reset。未定义"任务执行到一半复位"的后果。
+- 缺口: 中途 RESET 是中止当前任务回待命、还是触发重抽? 已抓取的物块如何处理?
+- 临时处理: _handle_reset 调 robot.reset() 回 LISTENING/IDLE, 未处理执行中打断。
+- 待定: C + B + 赛题 (赛题规定"需人工干预须重抽, 不得原任务继续")。
+
+#7 装配检查未精确时的处置
+- 事实: 数据字典 2.4 AssemblyCheck 有 precise/occlusion_ratio, 阈值"由后端配置 [推断]"。
+- 缺口: precise=False 时是重新放置 (调度级) 还是接受? occlusion_ratio 阈值取值? 重试次数?
+- 临时处理: 仅打印日志, 不重放。
+- 待定: A (视觉阈值) + D (处置)。
+
+#8 机械臂"读取当前位姿"接口缺失
+- 事实: 机械臂表有 move_to_view/pick/place/reset, 无"读当前位姿"。视野解算 (compute_*_view) 输入含"当前眼坐标", 需先知当前手系位姿再 hand_to_eye。
+- 缺口: 当前位姿由谁提供 —— 机械臂 SDK 读取, 还是后端维护估计?
+- 临时处理: RobotModule 临时加 current_pose() -> Pose(frame=hand)。
+- 待定: B (机械臂表作者)。
+
+#9 语音识别 START 之外的命令归属
+- 事实: 语音识别表原只有"唤醒/启动"两行, 数据字典 4.1 VoiceEvent.command 含 WAKE/START/RESET/RETRY 四值。已在语音识别表把"启动"行输出补为 START/RESET/RETRY。
+- 缺口: RETRY 由谁在什么时机说 (重抽任务卡后)? RESET 在哪些状态可用? 需在语音识别表补行或加说明。
+- 临时处理: dispatcher 在 REDRAW 态接收 RETRY, 任意态接收 RESET。
+- 待定: C。

@@ -19,7 +19,7 @@ reviews/     评审记录;未通过评审的代码不得作为已验证成果引
 
 ## 约定
 
-- 写作:遵循 `memory/writing-standards.md`(禁绝对化、事实与判断分离、性能结论要数据)。
+- 写作:遵循 `memory/writing-standards.md`(禁绝对化、事实与判断分离、性能结论要数据、不用博取注意的开场、优先正向表达、克制关联词);该规范同样适用于助手在对话中的输出。
 - 协作:A 苏朗(视觉)/ B 王培如(机械臂)/ C 王俊涵(认知与交互)/ D 王乐(平台后端);签名 `<!--A-->` 等,详见 `memory/collaboration-protocol.md`。
 - 环境:Python 3.11 + `code/requirements.txt`,详见 `memory/dependency-versions.md`。
 - 远程仓库:`magneticyue-tech/embodied-assembly-2026`(公开);开工前 pull,二进制文件改前协调。
