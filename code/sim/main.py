@@ -36,6 +36,7 @@ import cognition
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'execution'))
 import execution
 import interaction
+import voice_interaction
 import annotate
 
 
@@ -167,7 +168,16 @@ def main():
     os.makedirs(C.OUTPUT_DIR, exist_ok=True)
 
     # 依赖装配: 主流程只依赖抽象接口, 这里注入仿真实现。
-    io = interaction.ConsoleInteraction(os.path.join(C.OUTPUT_DIR, "parse_log_20260617.txt"))
+    log_path = os.path.join(C.OUTPUT_DIR, "parse_log_20260617.txt")
+
+    use_voice = getattr(C, 'USE_VOICE', False)
+    if args and hasattr(args, 'voice') and args.voice:
+        use_voice = True
+
+    if use_voice:
+        io = voice_interaction.VoiceInteraction(log_path)
+    else:
+        io = interaction.ConsoleInteraction(log_path)
     vis = vision.OpenCVVision()
     cog = cognition.RuleBasedCognition()
     scene = S.Scene(seed=7)

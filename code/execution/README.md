@@ -125,6 +125,7 @@ TRANSFORM_CONFIG = {                # 坐标变换配置
 ```
 code/execution/
 ├── execution.py          # Python 执行层主文件
+├── robot_control.py      # 机械臂控制脚本（命令行/交互/脚本模式）
 ├── robot_driver/         # C 语言驱动目录
 │   └── robot_driver.c    # C 驱动代码（占位桩）
 └── README.md             # 本文件
@@ -175,6 +176,45 @@ robot = execution.SimRobot(io)
 
 # 真机模式
 robot = execution.AuboRobot(io, host="192.168.1.100", port=5000)
+```
+
+### 机械臂控制脚本
+
+`robot_control.py` 提供三种操作模式：
+
+#### 命令行模式（快速发送单个指令）
+```bash
+# 发送 PICK 指令
+python robot_control.py --host 192.168.1.100 --pick red --x 100 --y 50 --deg 0
+
+# 发送 PLACE 指令
+python robot_control.py --place red --tray blue --x 200 --y 100 --deg 90
+```
+
+#### 交互模式（手动控制）
+```bash
+python robot_control.py --interactive
+```
+
+进入交互终端后可用命令：
+- `pick <color> <x> <y> <deg>` - 抓取方块
+- `place <block> <tray> <x> <y> <deg>` - 放置方块
+- `test` - 测试连接
+- `status` - 显示当前配置
+- `quit` - 退出
+
+#### 脚本模式（执行预定义序列）
+```bash
+python robot_control.py --script sequence.json
+```
+
+脚本文件格式（JSON）：
+```json
+[
+    {"cmd": "PICK", "color": "red", "x": 100.0, "y": 50.0, "deg": 0.0, "delay": 1.0},
+    {"cmd": "PLACE", "block_color": "red", "tray_color": "blue", "x": 200.0, "y": 100.0, "deg": 90.0, "delay": 1.0},
+    {"cmd": "WAIT", "seconds": 2.0}
+]
 ```
 
 ### 运行测试

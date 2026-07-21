@@ -26,6 +26,10 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+<<<<<<< HEAD
+#include <windows.h>
+=======
+>>>>>>> e9cdebebe9a27ddaf7ada2f725f38c6de9bb5d6a
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef SOCKET socket_handle_t;
@@ -161,7 +165,11 @@ static int extract_json_float(const char *json, const char *key, float *output) 
     errno = 0;
     char *end;
     float parsed = strtof(value, &end);
+<<<<<<< HEAD
+    if (end == value || errno == ERANGE) {
+=======
     if (end == value || errno == ERANGE || !isfinite(parsed)) {
+>>>>>>> e9cdebebe9a27ddaf7ada2f725f38c6de9bb5d6a
         return 0;
     }
 
@@ -337,6 +345,11 @@ int main(int argc, char *argv[]) {
     char buffer[BUFFER_SIZE];
     socket_len_t client_len;
     int port = DEFAULT_PORT;
+
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
 
     /* 评分要求执行状态实时可观察；重定向日志时也立即刷新。 */
     setvbuf(stdout, NULL, _IONBF, 0);

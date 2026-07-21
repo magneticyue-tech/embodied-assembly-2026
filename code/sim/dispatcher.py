@@ -181,6 +181,14 @@ MODULE_RETRY_LIMIT = 2       # 模块级原地重试次数
 DISPATCH_RECOVER_LIMIT = 2   # 调度级恢复次数
 
 
+# TODO(待标定 / 见 状态机待补清单 #10): 扫描(默认)姿态。
+#   机械臂启动后的默认位姿, 调试时标定; 该姿态下相机视野覆盖整个工作台。
+#   每次粗定位前恢复此姿态, 使 detect_card / detect_blocks / detect_tray
+#   在全台视野下进行, 避免上一步 (如 pick) 残留姿态挡住待测目标。
+#   下列数值为占位, 需现场标定后填入 (手系 Pose, m + rad)。
+SCAN_POSE = Pose(frame="hand", x=0.0, y=0.0, z=0.5, rz=0.0)
+
+
 def classify_disposition(code: int, module_tries: int, recover_tries: int) -> Disposition:
     """
     按错误码 + 已重试次数决定当前应走的处置级别 (数据字典 0.4)。
@@ -298,17 +306,18 @@ class Dispatcher:
 
         except RedrawRequired as exc:
             self.io.log(f"[调度] {exc}")
-            self.speech.play_preset(PresetId.CARD_FAIL)
+            self.speech.play_preset(PresetId.REDRAW)
             self.state = State.REDRAW
             return self.state
 
     # ---- 模块流水线 (各步对应 schemes 表函数) ----
 
     def _recognize_card(self) -> CardTask:
-        """任务卡识别: 定位卡 -> 算最小可行视野 -> 移动 -> 重拍 -> 大模型分类。"""
+        """任务卡识别: 恢复扫描姿态 -> 粗定位卡 -> 算最小可行视野 -> 移动 -> 重拍 -> 大模型分类。"""
+        self._go_scan_pose()                             # 俯瞰全台再粗定位
         image = self._attempt("拍照", self.vision.capture)
         card_det = self._attempt("定位任务卡", lambda: self.vision.detect_card(image),
-                                 recover=self._recover_raise_camera)
+                                 recover=self._recover_rescan)
         eye = self._current_eye_pose()
         view = self._attempt("任务卡视野", lambda: self.geom.compute_card_view(card_det, eye))
         self._attempt("调整视野", lambda: self.robot.move_to_view(self._to_hand(view)),
@@ -334,37 +343,53 @@ class Dispatcher:
         bc, tc = ins["block_color"], ins["target_slot_color"]
         self.io.log(f"  -- 第{ins['seq']}步: {bc}块 -> {tc}槽 --")
 
-        # 1. 抓取物块视野 -> 移动 -> 定位物块 -> 规划抓取位姿 -> 抓取
+        # 1. 恢复扫描姿态 -> 粗定位物块 -> 算视野 -> 移近 -> 精定位 -> 规划抓取位姿 -> 抓取
+        self._go_scan_pose()                             # 俯瞰全台再粗定位物块
         image = self._attempt("拍照", self.vision.capture)
         blocks = self._attempt("定位物块", lambda: self.vision.detect_blocks(image),
-                               recover=self._recover_raise_camera)
+                               recover=self._recover_rescan)
         det = self._select_block(blocks, bc)
         view = self._attempt("物块抓取视野", lambda: self.geom.compute_block_view(det, self._current_eye_pose()))
         self._attempt("调整视野", lambda: self.robot.move_to_view(self._to_hand(view)),
                       recover=self._recover_change_pose)
         image = self._attempt("拍照", self.vision.capture)
         blocks = self._attempt("定位物块", lambda: self.vision.detect_blocks(image),
-                               recover=self._recover_raise_camera)
+                               recover=self._recover_rescan)
         det = self._select_block(blocks, bc)
         grasp = self._attempt("规划抓取位姿", lambda: self.geom.plan_block_pick(det, self._current_eye_pose()))
         self._attempt("抓取物块", lambda: self.robot.pick(grasp), recover=self._recover_change_pose)
 
-        # 2. 托盘装配视野 -> 移动 -> 规划放置位姿 -> 放置
+        # 2. 放置 + 装配检查: 未精确时重放一次, 仍未精确则接受并记录。
+        self._place_and_check(tc)
+
+    def _place_once(self, tc: str) -> None:
+        """恢复扫描姿态 -> 粗定位托盘 -> 算装配视野 -> 移近 -> 规划放置位姿 -> 放置。
+        抓取后机械臂停在物块附近, 需先回扫描姿态使相机俯瞰托盘 (见 SCAN_POSE)。"""
+        self._go_scan_pose()
         image = self._attempt("拍照", self.vision.capture)
         tray = self._attempt("定位托盘", lambda: self.vision.detect_tray(image),
-                             recover=self._recover_raise_camera)
+                             recover=self._recover_rescan)
         tview = self._attempt("托盘装配视野", lambda: self.geom.compute_tray_view(tray, self._current_eye_pose()))
         self._attempt("调整视野", lambda: self.robot.move_to_view(self._to_hand(tview)),
                       recover=self._recover_change_pose)
         place = self._attempt("规划放置位姿", lambda: self.geom.plan_slot_place(tray, tc, self._current_eye_pose()))
         self._attempt("放置物块", lambda: self.robot.place(place), recover=self._recover_change_pose)
 
-        # 3. 装配检查
+    def _place_and_check(self, tc: str) -> None:
+        """放置并做装配检查; 未精确时重放一次后接受 (数据字典 2.4, 见清单 #7)。
+        TODO(待确认): occlusion 阈值 (precise 判定) 与"重放一次"次数上限待全队核查。"""
+        self._place_once(tc)
+        image = self._attempt("拍照", self.vision.capture)
+        check = self._attempt("装配检查", lambda: self.vision.check_assembly(image))
+        if check.get("precise", False):
+            return
+        # 未精确: 重放一次后接受
+        self.io.log(f"  [装配检查] 未精确 occlusion={check.get('occlusion_ratio')}, 重放一次")
+        self._place_once(tc)
         image = self._attempt("拍照", self.vision.capture)
         check = self._attempt("装配检查", lambda: self.vision.check_assembly(image))
         if not check.get("precise", False):
-            # TODO(待补): 未精确时是重放(调度级)还是接受, 阈值与重试策略未定。见清单 #7。
-            self.io.log(f"  [装配检查] 未精确 occlusion={check.get('occlusion_ratio')}")
+            self.io.log(f"  [装配检查] 重放后仍未精确 occlusion={check.get('occlusion_ratio')}, 接受当前结果")
 
     # ---- 重试内核 (数据字典 0.4) ----
 
@@ -395,10 +420,11 @@ class Dispatcher:
 
     # ---- 调度级恢复动作 (占位) ----
 
-    def _recover_raise_camera(self) -> None:
-        """调度级恢复: 抬高相机重新取景 (数据字典 0.4 示例)。"""
-        self.io.log("  [恢复] 抬高相机高度, 重新取景")
-        # TODO(待补): 需机械臂 move_to_view 到更高眼系高度; 高度增量策略未定。
+    def _recover_rescan(self) -> None:
+        """调度级恢复: 视觉未识别时, 回扫描姿态重拍 (数据字典 0.4 示例)。
+        扫描姿态即俯瞰全台的最优视野, 无需单独抬高相机, 回到该姿态重新取景即可。"""
+        self.io.log("  [恢复] 回扫描姿态, 重新取景")
+        self._go_scan_pose()
 
     def _recover_change_pose(self) -> None:
         """调度级恢复: 换一个可达姿态重试 (逆解超限时)。"""
@@ -406,6 +432,12 @@ class Dispatcher:
         # TODO(待补): 备选姿态如何生成未定。
 
     # ---- 辅助 ----
+
+    def _go_scan_pose(self) -> None:
+        """恢复扫描(默认)姿态: 相机俯瞰全台, 供粗定位。见 SCAN_POSE 说明与清单 #10。
+        逆解超限时走调度级恢复 (换姿态重试)。"""
+        self._attempt("恢复扫描姿态", lambda: self.robot.move_to_view(SCAN_POSE),
+                      recover=self._recover_change_pose)
 
     def _current_eye_pose(self) -> Pose:
         """当前眼系位姿 = 当前手系位姿经手眼标定换算。
