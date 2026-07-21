@@ -24,29 +24,45 @@ class WakeWordDetector:
         self.is_paused = False  # 暂停检测（触发后暂停，等指令完成后恢复）
         self.callback = None
         self.vosk_model = None
+        self.vosk_recognizer = None
+        self.model_dir = None
         self.audio_queue = queue.Queue()
         self._init_detector()
 
     def _init_detector(self):
         try:
             from vosk import Model, KaldiRecognizer
+            import tempfile
+            import shutil
 
-            # 查找模型目录
             model_dir_large = os.path.join(os.path.dirname(__file__), "..", "model", "vosk-model-cn-0.22")
             model_dir_small = os.path.join(os.path.dirname(__file__), "..", "model", "vosk-model-small-cn-0.22")
 
             if os.path.exists(model_dir_large):
-                self.model_dir = model_dir_large
+                src_model_dir = model_dir_large
                 print("[唤醒模块] 使用 Vosk 大模型（准确率更高）")
             elif os.path.exists(model_dir_small):
-                self.model_dir = model_dir_small
+                src_model_dir = model_dir_small
                 print("[唤醒模块] 使用 Vosk 小模型（速度快）")
             else:
                 print("[唤醒模块] ❌ 未找到 Vosk 模型！")
                 print("[唤醒模块] 请运行: python download_vosk_model.py")
                 return
 
-            self.vosk_model = Model(self.model_dir)
+            print("[唤醒模块] 复制模型到临时目录（避免中文路径问题）...")
+            tmp_dir = tempfile.mkdtemp(prefix='vosk_')
+            self.model_dir = os.path.join(tmp_dir, 'model')
+            shutil.copytree(src_model_dir, self.model_dir)
+            print(f"[唤醒模块] 模型临时路径: {self.model_dir}")
+
+            try:
+                self.vosk_model = Model(self.model_dir)
+            except Exception as e:
+                print(f"[唤醒模块] ❌ 模型加载失败: {e}")
+                import traceback
+                traceback.print_exc()
+                shutil.rmtree(tmp_dir)
+                return
 
             # 借鉴小智项目的思路：专用唤醒词引擎
             # 使用 Vosk 语法约束，只识别唤醒词，不识别其他词
@@ -70,14 +86,19 @@ class WakeWordDetector:
                 "[unk]"
             ]
 
-            # 创建带语法约束的识别器
             grammar_json = json.dumps(self.grammar_phrases, ensure_ascii=False)
-            self.vosk_recognizer = KaldiRecognizer(self.vosk_model, 16000, grammar_json)
-            self.vosk_recognizer.SetWords(True)
-
-            print(f"[唤醒模块] ✅ 已加载 Vosk 中文语音模型")
-            print(f"[唤醒模块] 🎤 使用语法约束模式（借鉴小智专用唤醒词引擎）")
-            print(f"[唤醒模块] 🎤 监听唤醒词: 小具同学")
+            print(f"[唤醒模块] 尝试创建识别器...")
+            try:
+                self.vosk_recognizer = KaldiRecognizer(self.vosk_model, 16000, grammar_json)
+                self.vosk_recognizer.SetWords(True)
+                print(f"[唤醒模块] ✅ 已加载 Vosk 中文语音模型")
+                print(f"[唤醒模块] 🎤 使用语法约束模式（借鉴小智专用唤醒词引擎）")
+                print(f"[唤醒模块] 🎤 监听唤醒词: 小具同学")
+            except Exception as e:
+                print(f"[唤醒模块] ❌ 创建识别器失败: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                return
 
         except Exception as e:
             print(f"[唤醒模块] ❌ 初始化失败: {e}")
@@ -242,6 +263,10 @@ class WakeWordDetector:
 
     def start(self):
         """启动唤醒词检测"""
+        if not self.vosk_recognizer:
+            print("[唤醒模块] ❌ 无法启动：识别器未初始化，请检查模型是否正确加载")
+            return
+        
         self.is_running = True
         self.is_paused = False
         self.detect_wake_word()

@@ -169,6 +169,15 @@ class VoiceAssistant:
         print()
         print("[系统] 启动语音助手...")
 
+        if not self.wake_word_detector.vosk_recognizer:
+            print("[系统] ❌ 唤醒词检测器未初始化，无法启动语音助手")
+            print("[系统] ⚠️ 请检查 Vosk 模型是否正确下载和配置")
+            print("[系统] ⚠️ 将进入文本输入模式")
+            while self.is_running:
+                self.text_input_mode()
+                time.sleep(0.5)
+            return
+
         # 启动唤醒词检测线程（非 daemon，防止程序退出）
         wake_thread = threading.Thread(target=self.wake_word_detector.start)
         wake_thread.daemon = False

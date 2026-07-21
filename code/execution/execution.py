@@ -460,6 +460,9 @@ def parse_args():
     parser.add_argument("--scale", type=float,
                         help="缩放因子")
 
+    parser.add_argument("--voice", action="store_true",
+                        help="启用语音交互模式")
+
     return parser.parse_args()
 
 
